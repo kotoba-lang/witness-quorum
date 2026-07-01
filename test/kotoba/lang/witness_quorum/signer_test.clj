@@ -3,7 +3,7 @@
   signature) triple was generated from this repo's own @noble/curves
   TypeScript dependency (`node -e \"const {ed25519} = require('@noble/curves/ed25519'); ...\"`)
   -- the same library the original src/signer.ts uses. This pins that
-  Bouncy Castle's Ed25519 (used by kotoba.lang.witness-quorum.signer)
+  kotoba-lang/ed25519 (used by kotoba.lang.witness-quorum.signer)
   produces byte-identical output to @noble/curves for the same seed +
   message, which is the whole point of a cross-language attestation scheme:
   a signature produced on one side must verify (and, since Ed25519 is
@@ -34,12 +34,12 @@
 (def ^:private noble-sig-hex "cbbd8e59c0dc67f9617903852bafd3bac4b26906384d74bdaaced6b830bf8a631c2877fd5a072b1138793e648cd7a96623304510f4eb357958569cf42aadcb01")
 
 (deftest cross-language-ed25519-interop-test
-  (testing "Bouncy Castle derives the same public key @noble/curves derived for this seed"
+  (testing "kotoba-lang/ed25519 derives the same public key @noble/curves derived for this seed"
     (let [seed (hex->bytes noble-seed-hex)
           pub (signer/ed25519-public-key-bytes seed)]
       (is (= noble-pub-hex (bytes->hex pub)))))
 
-  (testing "Bouncy Castle produces the byte-identical signature @noble/curves produced (Ed25519 is deterministic)"
+  (testing "kotoba-lang/ed25519 produces the byte-identical signature @noble/curves produced (Ed25519 is deterministic)"
     (let [seed (hex->bytes noble-seed-hex)
           msg (hex->bytes noble-msg-hex)
           cell-signer (signer/make-ed25519-cell-signer seed)

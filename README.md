@@ -76,17 +76,27 @@ Namespace-per-module, mirroring the TS file boundaries:
 
 Notable adaptations from the TS original (all synchronous — no
 Promise/async plumbing on the JVM):
-- **Ed25519 uses Bouncy Castle** (`org.bouncycastle/bcprov-jdk18on`), not
-  the JDK's built-in `java.security` Ed25519 KeyPairGenerator/KeyFactory.
-  Verified empirically that the JDK's native Ed25519 key generation does
-  **not** derive the same public key from a raw 32-byte seed that RFC 8032
-  / `@noble/curves` (the TS original's dependency) do, even when driven
-  through a fixed-output `SecureRandom`. Bouncy Castle's
-  `Ed25519PrivateKeyParameters`/`Ed25519Signer` were verified byte-for-byte
-  identical to `@noble/curves`' `getPublicKey`/`sign` for a known seed —
-  see `signer_test.clj`'s `cross-language-ed25519-interop-test`, which pins
-  a (seed, canonical, signature) triple generated from this repo's own
-  `@noble/curves` npm dependency via `node -e`.
+- **Ed25519 is built on `kotoba-lang/ed25519`** (`ed25519.core`), not
+  Bouncy Castle and not the JDK's `java.security` Ed25519
+  KeyPairGenerator/KeyFactory used free-hand. Two independent
+  disqualifiers ruled out the alternatives: (1) verified empirically that
+  the JDK's native Ed25519 key generation does **not** derive the same
+  public key from a raw 32-byte seed that RFC 8032 / `@noble/curves` (the
+  TS original's dependency) do, even driven through a fixed-output
+  `SecureRandom`; (2) Bouncy Castle is **not loadable under babashka** —
+  its GraalVM native image has no `org.bouncycastle.*` classes baked in,
+  so any BC import throws `ClassNotFoundException` at runtime under `bb`,
+  which matters directly here since this package's own docstrings
+  describe an exclusively `bb`-based deployment topology. `ed25519.core`
+  solves both: pure RFC-8032 math (SHA-512 + `BigInteger` only) derives
+  the public key from a raw seed, then the JDK's own built-in
+  `java.security` Ed25519 `Signature`/`KeyFactory` (core JDK, not a
+  3rd-party jar — fine under `bb`) does the actual signing/verification.
+  Verified byte-for-byte identical to `@noble/curves`' `getPublicKey`/
+  `sign` for a known seed — see `signer_test.clj`'s
+  `cross-language-ed25519-interop-test`, which pins a (seed, canonical,
+  signature) triple generated from this repo's own `@noble/curves` npm
+  dependency via `node -e`.
 - `WriteCapableClient.write` (a single-method TS interface) becomes a
   plain function `(fn [write-opts] -> {:uri ... :cid ...})` — idiomatic
   Clojure prefers a function argument over a single-method object.
@@ -109,9 +119,11 @@ Promise/async plumbing on the JVM):
   here — this port operates purely in-memory today.
 
 Tests (`test/kotoba/lang/witness_quorum/*_test.clj`, run via `clojure
--M:test` — not `bb`, since `com.sun.net.httpserver`-style JDK internals
-used elsewhere in this session's ports aren't on babashka's restricted
-classlist and plain JVM Clojure is simplest here regardless): 26 tests /
+-M:test`; every dependency here -- `ed25519.core`, `java.util.concurrent`,
+`java.security.MessageDigest` -- is on babashka's classlist too, so this
+package (unlike `kotoba-lang/ipfs`'s `com.sun.net.httpserver`-based mock
+server tests) has no actual `bb` incompatibility; `clojure -M:test` is
+just the test-runner this repo is wired for, not a requirement): 26 tests /
 77 assertions, covering deterministic selection, the full quorum-state
 decision table (witnessed/rejected/pending/escalated, including the
 "any :escalate vote forces escalation regardless of :escalation-policy"
