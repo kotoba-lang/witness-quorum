@@ -5,14 +5,14 @@ accept/reject/escalate decision rule, and Ed25519-signed validation-membrane
 attestation production, over a pluggable witness transport (in-memory or
 PDS-polling).
 
-| Module | What it does |
+| Namespace | What it does |
 |---|---|
-| `witness-selector.ts` | `selectWitnesses`/`quorumGroup` — deterministic `sha256(cid) mod sorted-fleet` selection over a `FleetCell[]` |
-| `quorum.ts` | `collectQuorum`/`quorumState` — pure accept/reject/escalate reducer by threshold, given a stream of `Attestation`s |
-| `attestation.ts` | `produceAttestation`/`validateAgainstMembrane` — 3-layer validation membrane (schema/deterministic/policy) + Ed25519-signed attestation, parameterized by `MembraneRule` |
-| `signer.ts` | `makeEd25519CellSigner`/`verifyEd25519Signature` — generic Ed25519 sign/verify helpers |
-| `orchestrator.ts` | `writeWithWitnesses` — "write, then collect witness quorum" orchestrator over pluggable `WriteCapableClient`/`WitnessTransport` |
-| `pds-transport.ts` | `createPdsPollingWitnessTransport` — HTTP-fan-out + PDS-polling `WitnessTransport` implementation |
+| `selector.clj` | deterministic `sha256(cid) mod sorted-fleet` witness selection over a fleet |
+| `quorum.clj` | `collect-quorum`/`quorum-state` — pure accept/reject/escalate reducer by threshold, given a stream of attestations |
+| `attestation.clj` | 3-layer validation membrane (schema/deterministic/policy) + Ed25519-signed attestation, parameterized by a membrane rule |
+| `signer.clj` | generic Ed25519 sign/verify helpers |
+| `orchestrator.clj` | `write-with-witnesses` — "write, then collect witness quorum" orchestrator over a pluggable write client / witness transport |
+| *(host-supplied)* | the production HTTP-fan-out + PDS-polling `WitnessTransport` is **deliberately not ported** — see below |
 
 Zero etzhayyim-specific coupling beyond an NSID string constant and a
 `"council"` escalation label — every fleet topology, membrane rule, and
@@ -38,15 +38,12 @@ the module's original directory name) to describe what it actually does
 and avoid echoing the name of the now-deleted Rust crate.
 
 No live consumer imports `@etzhayyim/sdk/kotoba-datomic` today (only
-doc/ADR references) — `etzhayyim-sdk`'s own `src/kotoba-datomic/index.ts`
-still becomes a re-export shim to honor that public API contract, matching
-the pattern established by `kotoba-lang/{ipfs,checkpointer,base-l2}`.
-
-The initial relocation was a **physical move only** (TypeScript unchanged).
-A Clojure port has since landed (see below) and is now the canonical
-implementation for new Clojure/babashka consumers.
-
-**`dist/` is committed** (see `kotoba-lang/pqh`'s README for the rationale).
+doc/ADR references). The TypeScript original was relocated here as a
+**physical move only**, then ported to Clojure (see below), and the
+TypeScript has since been **deleted** per ADR-2607012200 — the
+`kotoba-lang` org's admission rule is pure Clojure/CLJC with zero vendor
+SDK and zero network I/O from the lib. This Clojure implementation is now
+the only implementation.
 
 ## Clojure port
 
@@ -134,19 +131,9 @@ cross-language interop vector, and an end-to-end
 
 ## Development
 
-TypeScript:
-
 ```bash
-npm install
-npm test
-npm run build
-```
-
-Clojure:
-
-```bash
-clj-kondo --lint src test
-clojure -M:test
+clojure -M:lint      # clj-kondo (errors fail)
+clojure -M:test      # cognitect test-runner
 ```
 
 ## License
