@@ -8,7 +8,35 @@
   CLJ port of this repo's original @etzhayyim/witness-quorum TypeScript
   package (src/quorum.ts). JVM-only -- see the repo README.
 
-  Per kotoba-datomic SPEC S5 + ADR-2605231400.")
+  Per kotoba-datomic SPEC S5 + ADR-2605231400."
+  (:require [kotoba.lang.witness-quorum.attestation :as attestation]
+            [kotoba.lang.witness-quorum.signer :as signer]))
+
+(defn- witness-signature-valid?
+  "True iff `a`'s :signature verifies against its witness cell's declared
+  :public-key. A witness with no known public key (see selector/fleet-cell)
+  can't be verified, so it's treated as valid -- not a silent skip, a
+  documented limitation of a library with no cell-key-registry of its own.
+  A witness WITH a public key whose attestation lacks a :signature, or whose
+  signature doesn't verify, is rejected -- forged/unsigned attestations must
+  never count toward quorum for a witness whose real key is known."
+  [witness-key->pubkey a]
+  (let [pubkey (get witness-key->pubkey (str (:cell-node a) "::" (:cell-id a)))]
+    (or (nil? pubkey)
+        (boolean
+         (and (:signature a)
+              (try
+                (signer/verify-ed25519-signature
+                 (attestation/canonical-attestation-bytes
+                  {:record-cid       (:record-cid a)
+                   :cell-id          (:cell-id a)
+                   :verdict          (:verdict a)
+                   :reason           (or (:reason a) "")
+                   :membrane-version (:membrane-version a)
+                   :attested-at      (:attested-at a)})
+                 (:signature a)
+                 pubkey)
+                (catch Exception _ false)))))))
 
 (def default-quorum-options
   {:quorum-size 5 :quorum-threshold 3 :escalation-policy :council})
@@ -26,6 +54,12 @@
   Semantics:
     - Filter `attestations` to those whose (:cell-node :cell-id) is in the
       witness set. Anything else is ignored.
+    - For witnesses whose `selector/fleet-cell` carries a `:public-key`,
+      verify each attestation's `:signature` against it (see
+      `witness-signature-valid?`) -- a forged or missing signature for a
+      witness with a KNOWN public key is dropped, not counted toward
+      quorum. Witnesses with no declared `:public-key` can't be verified
+      and their attestations pass through unverified.
     - Dedup by cell, keeping the latest `:attested-at` per cell.
     - Group by :verdict. If any verdict reaches :quorum-threshold, the
       record's state is decided by that majority verdict.
@@ -49,8 +83,10 @@
        (throw (ex-info (str "witness-quorum: witness set has " (count witnesses) " cells, expected quorum-size " quorum-size)
                         {:witness-count (count witnesses) :quorum-size quorum-size})))
      (let [witness-keys (set (map :key witnesses))
-           eligible (filter (fn [a] (contains? witness-keys (str (:cell-node a) "::" (:cell-id a))))
-                             attestations)
+           witness-key->pubkey (into {} (keep (fn [w] (when (:public-key w) [(:key w) (:public-key w)]))) witnesses)
+           eligible (->> attestations
+                         (filter (fn [a] (contains? witness-keys (str (:cell-node a) "::" (:cell-id a)))))
+                         (filter (partial witness-signature-valid? witness-key->pubkey)))
            deduped (reduce (fn [acc a]
                               (let [k (str (:cell-node a) "::" (:cell-id a))
                                     prior (get acc k)]

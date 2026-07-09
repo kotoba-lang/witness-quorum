@@ -14,9 +14,20 @@
   "Build a fleet cell map from a node hostname/name + cell-id. The composite
   `:key` (`node::cell-id`) is the selection-universe identity -- a cell
   moving between nodes counts as a different witness slot (intentional: the
-  node is part of the trust assertion)."
-  [node cell-id]
-  {:node node :cell-id cell-id :key (str node "::" cell-id)})
+  node is part of the trust assertion).
+
+  Optional `public-key` (raw 32-byte Ed25519 public key) is the cell's
+  published key, used by `quorum/quorum-state` to verify each attestation's
+  `:signature` before it counts toward quorum. A witness with no declared
+  `:public-key` is a documented gap, not a silent one: `quorum-state` cannot
+  verify what it has no key material for, so its attestations are accepted
+  unverified (matching this library's current no-PKI-registry deployment
+  reality) -- but any witness that DOES carry a public-key has its
+  attestations' signatures checked and forged/invalid ones rejected."
+  ([node cell-id] (fleet-cell node cell-id nil))
+  ([node cell-id public-key]
+   (cond-> {:node node :cell-id cell-id :key (str node "::" cell-id)}
+     public-key (assoc :public-key public-key))))
 
 (defn- sha256-hex ^String [^String s]
   (let [digest (.digest (MessageDigest/getInstance "SHA-256") (.getBytes s "UTF-8"))]
