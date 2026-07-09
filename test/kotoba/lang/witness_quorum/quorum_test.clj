@@ -1,14 +1,73 @@
 (ns kotoba.lang.witness-quorum.quorum-test
   (:require [clojure.test :refer [deftest is testing]]
+            [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.quorum :as quorum]
-            [kotoba.lang.witness-quorum.selector :as selector])
-  (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
+            [kotoba.lang.witness-quorum.selector :as selector]
+            [kotoba.lang.witness-quorum.signer :as signer]
+            [ed25519.core :as ed])
+  (:import [java.security SecureRandom]
+           [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
 (defn- witnesses [n]
   (vec (for [i (range n)] (selector/fleet-cell (str "node-" i) "CellA"))))
 
 (defn- attest [cell verdict attested-at]
   {:cell-node (:node cell) :cell-id (:cell-id cell) :verdict verdict :attested-at attested-at})
+
+;; --- signature verification (witnesses WITH a declared :public-key) ---
+
+(defn- rand-seed ^bytes []
+  (let [b (byte-array 32)]
+    (.nextBytes (SecureRandom.) b)
+    b))
+
+(defn- keyed-witnesses [n]
+  (let [seeds (vec (repeatedly n rand-seed))]
+    {:seeds seeds
+     :witnesses (vec (for [i (range n)]
+                       (selector/fleet-cell (str "node-" i) "CellA"
+                                            (signer/ed25519-public-key-bytes (seeds i)))))}))
+
+(defn- signed-attest [cell seed verdict attested-at]
+  (let [canon (attestation/canonical-attestation-bytes
+               {:record-cid "cid-1" :cell-id (:cell-id cell) :verdict verdict
+                :reason "" :membrane-version "lex:1/rego:1/cell:abc" :attested-at attested-at})]
+    {:cell-node (:node cell) :cell-id (:cell-id cell) :verdict verdict :attested-at attested-at
+     :record-cid "cid-1" :reason nil :membrane-version "lex:1/rego:1/cell:abc"
+     :signature (ed/sign seed canon)}))
+
+(defn- forged-attest [cell verdict attested-at]
+  {:cell-node (:node cell) :cell-id (:cell-id cell) :verdict verdict :attested-at attested-at
+   :record-cid "cid-1" :reason nil :membrane-version "lex:1/rego:1/cell:abc"
+   :signature (byte-array 64 (byte 0))})
+
+(deftest quorum-state-verifies-signatures-when-public-key-is-known
+  (let [{:keys [seeds witnesses]} (keyed-witnesses 5)]
+    (testing "genuinely signed attestations reach quorum"
+      (let [atts [(signed-attest (witnesses 0) (seeds 0) :accept "t1")
+                  (signed-attest (witnesses 1) (seeds 1) :accept "t2")
+                  (signed-attest (witnesses 2) (seeds 2) :accept "t3")]]
+        (is (= :witnessed (:kind (quorum/quorum-state witnesses atts))))))
+    (testing "forged signatures against a KNOWN public key never count toward quorum"
+      (let [atts [(forged-attest (witnesses 0) :accept "t1")
+                  (forged-attest (witnesses 1) :accept "t2")
+                  (forged-attest (witnesses 2) :accept "t3")]]
+        (is (= :pending (:kind (quorum/quorum-state witnesses atts))))))
+    (testing "a missing :signature against a known public key is also rejected"
+      (let [atts [(dissoc (signed-attest (witnesses 0) (seeds 0) :accept "t1") :signature)
+                  (signed-attest (witnesses 1) (seeds 1) :accept "t2")
+                  (signed-attest (witnesses 2) (seeds 2) :accept "t3")]]
+        (is (= :pending (:kind (quorum/quorum-state witnesses atts))))))))
+
+(deftest quorum-state-skips-verification-for-a-witness-with-no-known-public-key
+  ;; Documented, deliberate: a library with no cell-key-registry of its own
+  ;; can't verify what it has no key material for. Preserves existing
+  ;; deterministic-test-signer / no-PKI-registry deployment behavior.
+  (let [w (witnesses 5)
+        atts [(forged-attest (w 0) :accept "t1")
+              (forged-attest (w 1) :accept "t2")
+              (forged-attest (w 2) :accept "t3")]]
+    (is (= :witnessed (:kind (quorum/quorum-state w atts))))))
 
 (deftest quorum-state-accept-test
   (let [w (witnesses 5)
