@@ -9,7 +9,9 @@
   (:require [clojure.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.orchestrator :as orchestrator]
-            [kotoba.lang.witness-quorum.selector :as selector]))
+            [kotoba.lang.witness-quorum.reputation :as reputation]
+            [kotoba.lang.witness-quorum.selector :as selector]
+            [kotoba.lang.witness-quorum.stake :as stake]))
 
 (defn- mock-fleet []
   ;; 10 nodes x 3 cells = 30 cells, mirroring the Murakumo shape but compact.
@@ -164,3 +166,118 @@
       (is (false? (:committed? result)))
       (is (not (contains? result :commit-result)))
       (is (empty? @commit-calls)))))
+
+;; --- write-with-witnesses-precommit-and-slash ----------------------------
+;; ADR-2607110300 Phase 4: reputation.clj and stake.clj were independently
+;; tested but nothing in the actual precommit flow ever called them --
+;; these tests prove the wiring, not just the two modules in isolation.
+
+(defn- synchronous-transport
+  "A deterministic, non-concurrent WitnessTransport stub: :request-attestation
+   is a no-op (the attestations are pre-built by the caller), and
+   :subscribe-attestations replays `attestations` in the exact given
+   order. Needed because create-in-memory-witness-transport dispatches
+   each cell handler via `future` -- which attestations land before
+   quorum/collect-quorum's early-exit-at-threshold fires is a genuine
+   race with real concurrency, so a test asserting exactly which cell
+   ends up in :matching vs :minority needs fully controlled ordering,
+   not real futures."
+  [attestations]
+  (let [remaining (atom (vec attestations))]
+    {:request-attestation (fn [_req] nil)
+     :subscribe-attestations
+     (fn [_quorum-group]
+       (fn [_remaining-ms]
+         (if-let [item (first @remaining)]
+           (do (swap! remaining rest) {:status :value :value item})
+           {:status :done})))}))
+
+(deftest precommit-and-slash-penalizes-only-the-disagreeing-witness
+  (testing "3-of-5 quorum-threshold reached with the dissenter's :reject
+            collected FIRST (deterministic order, not a race) -> :witnessed,
+            and ONLY the dissenter's reputation/stake take a hit"
+    (let [fleet (mock-fleet)
+          rule (mock-rule "test.example.slash")
+          cid "bafy-precommit-tid-slash-1"
+          selected (selector/select-witnesses cid fleet 5)
+          dissenter (first selected)
+          agreeing (rest selected) ;; only the first 3 of these 4 get collected before threshold fires
+          signer-for (fn [cell] (orchestrator/make-deterministic-test-signer (:cell-id cell)))
+          dissent-attestation (attestation/produce-attestation
+                                {:record-uri "at://x" :record-cid cid :record {:v 1}
+                                 :cell dissenter :rule rule :signer (signer-for dissenter)
+                                 :validators {:deterministic (fn [_r _rule] {:layer :deterministic :verdict :reject})}})
+          agree-attestations (mapv (fn [cell]
+                                     (attestation/produce-attestation
+                                      {:record-uri "at://x" :record-cid cid :record {:v 1}
+                                       :cell cell :rule rule :signer (signer-for cell)}))
+                                   agreeing)
+          transport (synchronous-transport (cons dissent-attestation agree-attestations))
+          stake-ledger (stake/post-bond stake/empty-ledger (:key dissenter) 100)
+          result (orchestrator/write-with-witnesses-precommit-and-slash
+                  {:propose-fn (mock-propose-fn)
+                   :commit-fn (fn [_write-opts receipt] {:committed-cid (:cid receipt)})
+                   :write-opts {:collection "test.example.slash" :rkey "tid-slash-1" :record {:v 1}}
+                   :fleet fleet
+                   :rule rule
+                   :transport transport
+                   :stake-ledger stake-ledger
+                   :slash-amount 25
+                   :timeout-ms 5000})]
+      (is (= :witnessed (:kind (:state result))))
+      (is (true? (:committed? result)))
+      (is (some #{(:key dissenter)} (map (fn [a] (str (:cell-node a) "::" (:cell-id a))) (:minority (:state result))))
+          "sanity: the dissenter really did land in :minority, not skipped by early-exit")
+      (is (== 0.0 (reputation/score (:reputation-db' result) (:key dissenter)))
+          "the dissenter's reputation reflects disagreement")
+      (is (= 75 (stake/balance (:stake-ledger' result) (:key dissenter)))
+          "the dissenter's stake was actually slashed (100 - 25)")
+      (is (= [{:cell-key (:key dissenter) :slashed 25}] (:slashed result)))
+      (doseq [cell (take 3 agreeing)] ;; only the first 3 accepts were needed to hit threshold=3
+        (is (== 1.0 (reputation/score (:reputation-db' result) (:key cell)))
+            (str (:key cell) " agreed -> perfect reputation"))))))
+
+(deftest precommit-and-slash-defaults-to-empty-reputation-and-stake
+  (testing "no :reputation-db/:stake-ledger supplied -> defaults apply, still returns the merged keys"
+    (let [fleet (mock-fleet)
+          rule (mock-rule "test.example.slash-defaults")
+          transport (orchestrator/create-in-memory-witness-transport
+                     {:cell-handlers (accept-all-handlers fleet)})
+          result (orchestrator/write-with-witnesses-precommit-and-slash
+                  {:propose-fn (mock-propose-fn)
+                   :commit-fn (fn [_write-opts receipt] {:committed-cid (:cid receipt)})
+                   :write-opts {:collection "test.example.slash-defaults" :rkey "tid-slash-2" :record {:v 1}}
+                   :fleet fleet
+                   :rule rule
+                   :transport transport
+                   :timeout-ms 5000})]
+      (is (= :witnessed (:kind (:state result))))
+      (is (contains? result :reputation-db'))
+      (is (contains? result :stake-ledger'))
+      (is (empty? (:slashed result)) "everyone agreed -- nothing to slash"))))
+
+(deftest precommit-and-slash-does-not-apply-outcomes-for-a-pending-state
+  (testing "non-decided quorum state (:pending) -> reputation-db'/stake-ledger' pass through
+            unchanged, matching reputation/record-quorum-outcomes's own caveat"
+    (let [fleet (mock-fleet)
+          rule (mock-rule "test.example.slash-pending")
+          write-fn (mock-propose-fn)
+          receipt-preview (selector/select-witnesses "bafy-precommit-tid-slash-3" fleet 5)
+          responsive-keys (set (map :key (take 1 receipt-preview)))
+          handlers (into {} (for [cell fleet :when (contains? responsive-keys (:key cell))]
+                              [(:key cell)
+                               (orchestrator/make-standard-cell-handler
+                                {:cell cell :signer (orchestrator/make-deterministic-test-signer (:cell-id cell))})]))
+          transport (orchestrator/create-in-memory-witness-transport {:cell-handlers handlers})
+          result (orchestrator/write-with-witnesses-precommit-and-slash
+                  {:propose-fn write-fn
+                   :commit-fn (fn [_write-opts receipt] {:committed-cid (:cid receipt)})
+                   :write-opts {:collection "test.example.slash-pending" :rkey "tid-slash-3" :record {:v 1}}
+                   :fleet fleet
+                   :rule rule
+                   :transport transport
+                   :timeout-ms 500})]
+      (is (= :pending (:kind (:state result))))
+      (is (= reputation/empty-reputation (:reputation-db' result)))
+      (is (= stake/empty-ledger (:stake-ledger' result)))
+      (is (empty? (:slashed result))))))

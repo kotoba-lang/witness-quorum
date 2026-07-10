@@ -15,7 +15,10 @@
   Per kotoba-datomic SPEC S5 + ADR-2605231400 S\"Implementation plan\" #2-#4."
   (:require [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.quorum :as quorum]
-            [kotoba.lang.witness-quorum.selector :as selector])
+            [kotoba.lang.witness-quorum.reputation :as reputation]
+            [kotoba.lang.witness-quorum.selector :as selector]
+            [kotoba.lang.witness-quorum.slashing :as slashing]
+            [kotoba.lang.witness-quorum.stake :as stake])
   (:import [java.security MessageDigest]
            [java.util.concurrent ConcurrentHashMap LinkedBlockingQueue TimeUnit]
            [java.util.function Function]))
@@ -116,6 +119,45 @@
                :state state
                :committed? witnessed?}
         witnessed? (assoc :commit-result (commit-fn write-opts receipt))))))
+
+(defn write-with-witnesses-precommit-and-slash
+  "write-with-witnesses-precommit, plus automatically applying the
+  resulting quorum state to reputation/stake via
+  slashing/apply-quorum-outcome (ADR-2607110300 Phase 4). Before this,
+  reputation.clj and stake.clj were independently tested but nothing
+  ever called them from the actual precommit flow -- a completed quorum
+  round had no economic consequence for the witnesses who disagreed
+  with it. This closes that gap: use this instead of
+  write-with-witnesses-precommit when you want reputation/stake tracked
+  automatically; use the plain version when you're managing those
+  separately (e.g. batching many rounds before updating).
+
+  Additional opts beyond write-with-witnesses-precommit:
+    :reputation-db  current reputation db. Default reputation/empty-reputation.
+    :stake-ledger   current stake ledger. Default stake/empty-ledger.
+    :slash-amount   bond units removed from a disagreeing witness per
+                    round. Default 10.
+
+  Returns write-with-witnesses-precommit's result map, plus
+  `:reputation-db'` / `:stake-ledger'` / `:slashed` (the UPDATED
+  reputation-db, updated stake-ledger, and this round's slash audit
+  trail) merged in. `:pending`/`:escalated` quorum states are NOT
+  applied (not a decision -- matches
+  reputation/record-quorum-outcomes's own caveat); in that case
+  `:reputation-db'`/`:stake-ledger'` pass through unchanged and
+  `:slashed` is empty."
+  [{:keys [reputation-db stake-ledger slash-amount]
+    :or {reputation-db reputation/empty-reputation
+         stake-ledger stake/empty-ledger
+         slash-amount 10}
+    :as opts}]
+  (let [result (write-with-witnesses-precommit opts)
+        decided? (contains? #{:witnessed :rejected} (:kind (:state result)))
+        {:keys [reputation-db stake-ledger slashed]}
+        (if decided?
+          (slashing/apply-quorum-outcome reputation-db stake-ledger (:state result) slash-amount)
+          {:reputation-db reputation-db :stake-ledger stake-ledger :slashed []})]
+    (assoc result :reputation-db' reputation-db :stake-ledger' stake-ledger :slashed slashed)))
 
 ;; --- In-memory transport (testing + integration smoke) ------------------
 
