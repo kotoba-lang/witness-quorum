@@ -108,3 +108,59 @@
                    :timeout-ms 500})]
       (is (= :pending (:kind (:state result))))
       (is (= 3 (:remaining (:state result)))))))
+
+;; --- write-with-witnesses-precommit --------------------------------------
+
+(defn- mock-propose-fn []
+  (fn [write-opts]
+    {:uri (str "at://did:web:test.example.com/" (:collection write-opts) "/" (:rkey write-opts "tid-proposed"))
+     :cid (str "bafy-precommit-" (:rkey write-opts "0"))}))
+
+(deftest write-with-witnesses-precommit-commits-only-after-witnessed-test
+  (testing "5-of-5 accept -> quorum reached BEFORE commit-fn ever runs, then commit-fn runs exactly once"
+    (let [fleet (mock-fleet)
+          rule (mock-rule "test.example.precommit")
+          transport (orchestrator/create-in-memory-witness-transport
+                     {:cell-handlers (accept-all-handlers fleet)})
+          commit-calls (atom [])
+          commit-fn (fn [write-opts receipt]
+                      (swap! commit-calls conj [write-opts receipt])
+                      {:committed-cid (:cid receipt)})
+          result (orchestrator/write-with-witnesses-precommit
+                  {:propose-fn (mock-propose-fn)
+                   :commit-fn commit-fn
+                   :write-opts {:collection "test.example.precommit" :rkey "tid-1" :record {:v 1 :hello "world"}}
+                   :fleet fleet
+                   :rule rule
+                   :transport transport
+                   :timeout-ms 5000})]
+      (is (= :witnessed (:kind (:state result))))
+      (is (true? (:committed? result)))
+      (is (= 1 (count @commit-calls)))
+      (is (= {:committed-cid "bafy-precommit-tid-1"} (:commit-result result))))))
+
+(deftest write-with-witnesses-precommit-never-commits-on-reject-test
+  (testing "schema-reject verdict -> commit-fn is NEVER invoked (this is the whole point of pre-commit)"
+    (let [fleet (mock-fleet)
+          rule (mock-rule "test.example.precommit-bad")
+          reject-handlers (into {} (for [cell fleet]
+                                      [(:key cell)
+                                       (orchestrator/make-standard-cell-handler
+                                        {:cell cell
+                                         :signer (orchestrator/make-deterministic-test-signer (:cell-id cell))
+                                         :validators {:schema attestation/minimal-schema-validator}})]))
+          transport (orchestrator/create-in-memory-witness-transport {:cell-handlers reject-handlers})
+          commit-calls (atom [])
+          commit-fn (fn [_write-opts _receipt] (swap! commit-calls conj :called) :should-not-happen)
+          result (orchestrator/write-with-witnesses-precommit
+                  {:propose-fn (mock-propose-fn)
+                   :commit-fn commit-fn
+                   :write-opts {:collection "test.example.precommit-bad" :rkey "tid-2" :record {:hello "no v field"}}
+                   :fleet fleet
+                   :rule rule
+                   :transport transport
+                   :timeout-ms 5000})]
+      (is (= :rejected (:kind (:state result))))
+      (is (false? (:committed? result)))
+      (is (not (contains? result :commit-result)))
+      (is (empty? @commit-calls)))))

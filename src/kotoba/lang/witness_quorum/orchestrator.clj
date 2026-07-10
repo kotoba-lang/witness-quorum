@@ -64,6 +64,59 @@
        :selected-witnesses selected
        :state state})))
 
+(defn write-with-witnesses-precommit
+  "Pre-commit variant of `write-with-witnesses` (ADR-2607110300 Phase 2):
+  the write is proposed to witnesses BEFORE it is applied, and `commit-fn`
+  only runs if the quorum reaches `:witnessed`. This is the difference
+  between post-hoc cosign (the record already exists when witnesses see it)
+  and pre-commit quorum (witnesses gate whether the record is applied at
+  all).
+
+  `opts` differs from `write-with-witnesses` in two keys:
+    :propose-fn  `(fn [write-opts] -> {:uri ... :cid ...})`. Computes the
+                 uri/cid the record WOULD have -- e.g. a local content-hash
+                 derivation -- WITHOUT persisting anything. Must be
+                 deterministic: the same `write-opts` must yield the same
+                 :cid `commit-fn` will later persist, since witnesses sign
+                 against this proposed cid.
+    :commit-fn   `(fn [write-opts receipt] -> commit-result)`. Called ONLY
+                 when the quorum state's :kind is :witnessed. Performs the
+                 actual write/append. Not called on :rejected, :escalated,
+                 or :pending.
+  All other opts (:write-opts :fleet :rule :transport :quorum-options
+  :timeout-ms) are unchanged from `write-with-witnesses`.
+
+  Returns {:uri ... :cid ... :selected-witnesses [...] :state <quorum-state>
+           :committed? bool :commit-result (present only when :committed? true)}.
+
+  Note (honesty, per ADR-2607110300): this is crash-fault tolerance among
+  witnesses operated by a single party, not Byzantine consensus -- there is
+  no fork-choice/view-change for conflicting concurrent proposals. Callers
+  must not represent this as BFT."
+  [{:keys [propose-fn commit-fn write-opts fleet rule transport quorum-options timeout-ms]}]
+  (let [quorum-options (or quorum-options
+                            {:quorum-size (:quorum-size rule)
+                             :quorum-threshold (:quorum-threshold rule)
+                             :escalation-policy (or (:escalation-policy rule) :council)})
+        receipt (propose-fn write-opts)
+        selected (selector/select-witnesses (:cid receipt) fleet (:quorum-size quorum-options (:quorum-size rule)))
+        qg (selector/quorum-group (:cid receipt))
+        poll-fn ((:subscribe-attestations transport) qg)]
+    (doseq [cell selected]
+      ((:request-attestation transport) {:cell cell
+                                          :record-uri (:uri receipt)
+                                          :record-cid (:cid receipt)
+                                          :record (:record write-opts)
+                                          :rule rule}))
+    (let [state (quorum/collect-quorum selected poll-fn (assoc quorum-options :timeout-ms (or timeout-ms 30000)))
+          witnessed? (= :witnessed (:kind state))]
+      (cond-> {:uri (:uri receipt)
+               :cid (:cid receipt)
+               :selected-witnesses selected
+               :state state
+               :committed? witnessed?}
+        witnessed? (assoc :commit-result (commit-fn write-opts receipt))))))
+
 ;; --- In-memory transport (testing + integration smoke) ------------------
 
 (defn- computing-queue ^LinkedBlockingQueue [^ConcurrentHashMap queues key]
