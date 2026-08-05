@@ -68,10 +68,25 @@
     - Otherwise return {:kind :pending ...} with the remaining count.
 
   Returns one of:
-    {:kind :witnessed :verdict :accept :matching [...] :minority [...]}
-    {:kind :rejected  :verdict :reject :matching [...] :minority [...]}
+    {:kind :witnessed :verdict :accept :matching [...] :minority [...] :abstained [...]}
+    {:kind :rejected  :verdict :reject :matching [...] :minority [...] :abstained [...]}
     {:kind :escalated :reason (:no-threshold|:policy) :attestations [...]}
-    {:kind :pending :attestations [...] :remaining n}"
+    {:kind :pending :attestations [...] :remaining n}
+
+  `:minority` and `:abstained` are DIFFERENT things and were merged until
+  2026-08-05 (ADR-2608055000 G1):
+
+    :minority   witnesses that returned the OPPOSITE decided verdict. They
+                asserted something and the quorum went the other way.
+    :abstained  witnesses that returned `:escalate` -- 'I cannot decide this'.
+                That is an honest report, not a wrong answer, and a design
+                that treats it as one teaches witnesses to guess with the
+                majority instead of saying so. Nothing downstream may attach
+                a consequence to this list.
+
+  Folding `:escalate` into `:minority` is what let
+  `slashing/apply-quorum-outcome` (now `outcome/apply-quorum-outcome`)
+  confiscate bond from a witness whose only act was declining to judge."
   ([witnesses attestations] (quorum-state witnesses attestations {}))
   ([witnesses attestations opts]
    (let [{:keys [quorum-size quorum-threshold escalation-policy]}
@@ -101,10 +116,12 @@
            escalates (get by-verdict :escalate [])]
        (cond
          (>= (count accepts) quorum-threshold)
-         {:kind :witnessed :verdict :accept :matching accepts :minority (into rejects escalates)}
+         {:kind :witnessed :verdict :accept :matching accepts
+          :minority rejects :abstained escalates}
 
          (>= (count rejects) quorum-threshold)
-         {:kind :rejected :verdict :reject :matching rejects :minority (into accepts escalates)}
+         {:kind :rejected :verdict :reject :matching rejects
+          :minority accepts :abstained escalates}
 
          :else
          (let [remaining (- quorum-size (count final-attestations))]
@@ -116,7 +133,8 @@
              {:kind :escalated :reason :no-threshold :attestations final-attestations}
 
              (= escalation-policy :reject)
-             {:kind :rejected :verdict :reject :matching rejects :minority (into accepts escalates)}
+             {:kind :rejected :verdict :reject :matching rejects
+              :minority accepts :abstained escalates}
 
              :else
              {:kind :escalated :reason :policy :attestations final-attestations})))))))

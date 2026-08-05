@@ -33,10 +33,20 @@
 
 (defn record-quorum-outcomes
   "Given a decided quorum-state (`{:kind :witnessed|:rejected :matching
-  [...] :minority [...]}`, exactly what
+  [...] :minority [...] :abstained [...]}`, exactly what
   kotoba.lang.witness-quorum.quorum/quorum-state returns), update every
-  participating cell's reputation in one pass: :matching cells agreed
-  with the majority, :minority cells did not."
+  JUDGING cell's reputation in one pass: :matching cells agreed with the
+  majority, :minority cells did not.
+
+  `:abstained` cells (verdict `:escalate`) are deliberately NOT recorded --
+  not as correct, not as incorrect, and not as an observation at all. An
+  abstaining cell keeps the exact score and observation count it had, so
+  abstention can never move it toward `below-threshold?`. Declining to judge
+  is an honest report about the cell's own confidence, and scoring it as a
+  wrong answer is what makes guessing-with-the-majority the safe play
+  (ADR-2608055000 G1; before 2026-08-05 `quorum-state` folded `:escalate`
+  into `:minority`, so this list did not exist and abstainers were scored as
+  wrong)."
   [reputation-db quorum-state]
   (let [cell-key (fn [a] (str (:cell-node a) "::" (:cell-id a)))]
     (as-> reputation-db db
