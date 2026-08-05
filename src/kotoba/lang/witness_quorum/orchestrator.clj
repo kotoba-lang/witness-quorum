@@ -16,8 +16,8 @@
   (:require [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.quorum :as quorum]
             [kotoba.lang.witness-quorum.reputation :as reputation]
+            [kotoba.lang.witness-quorum.outcome :as outcome]
             [kotoba.lang.witness-quorum.selector :as selector]
-            [kotoba.lang.witness-quorum.slashing :as slashing]
             [kotoba.lang.witness-quorum.stake :as stake])
   (:import [java.security MessageDigest]
            [java.util.concurrent ConcurrentHashMap LinkedBlockingQueue TimeUnit]
@@ -120,44 +120,65 @@
                :committed? witnessed?}
         witnessed? (assoc :commit-result (commit-fn write-opts receipt))))))
 
-(defn write-with-witnesses-precommit-and-slash
-  "write-with-witnesses-precommit, plus automatically applying the
-  resulting quorum state to reputation/stake via
-  slashing/apply-quorum-outcome (ADR-2607110300 Phase 4). Before this,
-  reputation.clj and stake.clj were independently tested but nothing
-  ever called them from the actual precommit flow -- a completed quorum
-  round had no economic consequence for the witnesses who disagreed
-  with it. This closes that gap: use this instead of
-  write-with-witnesses-precommit when you want reputation/stake tracked
-  automatically; use the plain version when you're managing those
-  separately (e.g. batching many rounds before updating).
+(defn write-with-witnesses-precommit-and-record
+  "write-with-witnesses-precommit, plus automatically applying the resulting
+  quorum state to REPUTATION via outcome/apply-quorum-outcome.
+
+  Renamed from `write-with-witnesses-precommit-and-slash` on 2026-08-05
+  (ADR-2608055000 G1), and it no longer slashes. The old version confiscated
+  bond from every witness in `:minority` -- which, because
+  `quorum/quorum-state` folded `:escalate` into that list, included witnesses
+  who only declined to judge. Disagreeing with a majority is not a
+  cryptographically settleable fault, so it may not cost anyone property; see
+  `outcome`'s docstring for the full argument and `stake/slash!` for where
+  bond arithmetic legitimately lives.
+
+  `:stake-ledger` is still accepted and still returned as `:stake-ledger'`,
+  now strictly as a PASS-THROUGH: this fn does not modify it under any quorum
+  outcome. It is kept in the signature so a caller threading a ledger through
+  a batch of rounds does not have to special-case this one, and so the
+  returned map still tells you which ledger the round ran against.
 
   Additional opts beyond write-with-witnesses-precommit:
     :reputation-db  current reputation db. Default reputation/empty-reputation.
     :stake-ledger   current stake ledger. Default stake/empty-ledger.
-    :slash-amount   bond units removed from a disagreeing witness per
-                    round. Default 10.
+                    Passed through unchanged.
 
-  Returns write-with-witnesses-precommit's result map, plus
-  `:reputation-db'` / `:stake-ledger'` / `:slashed` (the UPDATED
-  reputation-db, updated stake-ledger, and this round's slash audit
-  trail) merged in. `:pending`/`:escalated` quorum states are NOT
-  applied (not a decision -- matches
+  `:slash-amount` is accepted and IGNORED (callers pinned to an older
+  witness-quorum still pass it); it will be dropped once no caller sends it.
+
+  Returns write-with-witnesses-precommit's result map plus `:reputation-db'`
+  (updated), `:stake-ledger'` (unchanged), and `:outcomes` (this round's
+  `{:agreed :disagreed :abstained}` cell-key audit trail, replacing the old
+  `:slashed` vector of confiscated units). `:pending`/`:escalated` quorum
+  states are NOT applied (not a decision -- matches
   reputation/record-quorum-outcomes's own caveat); in that case
-  `:reputation-db'`/`:stake-ledger'` pass through unchanged and
-  `:slashed` is empty."
-  [{:keys [reputation-db stake-ledger slash-amount]
+  `:reputation-db'` passes through unchanged and `:outcomes` is empty."
+  [{:keys [reputation-db stake-ledger]
     :or {reputation-db reputation/empty-reputation
-         stake-ledger stake/empty-ledger
-         slash-amount 10}
+         stake-ledger stake/empty-ledger}
     :as opts}]
   (let [result (write-with-witnesses-precommit opts)
         decided? (contains? #{:witnessed :rejected} (:kind (:state result)))
-        {:keys [reputation-db stake-ledger slashed]}
+        {:keys [reputation-db outcomes]}
         (if decided?
-          (slashing/apply-quorum-outcome reputation-db stake-ledger (:state result) slash-amount)
-          {:reputation-db reputation-db :stake-ledger stake-ledger :slashed []})]
-    (assoc result :reputation-db' reputation-db :stake-ledger' stake-ledger :slashed slashed)))
+          (outcome/apply-quorum-outcome reputation-db (:state result))
+          {:reputation-db reputation-db
+           :outcomes {:agreed [] :disagreed [] :abstained []}})]
+    (assoc result
+           :reputation-db' reputation-db
+           :stake-ledger' stake-ledger
+           :outcomes outcomes)))
+
+(def ^{:deprecated "2026-08-05"
+       :doc "Deprecated alias for `write-with-witnesses-precommit-and-record`,
+  kept only so a caller pinned to an older witness-quorum keeps resolving
+  while west pins move (murakumo's overlay is the one caller). It does NOT
+  slash -- the name is the only thing that survived. Callers must migrate:
+  the result carries `:outcomes` instead of `:slashed`, and `:stake-ledger'`
+  is now always the ledger you passed in. ADR-2608055000 G1."}
+  write-with-witnesses-precommit-and-slash
+  write-with-witnesses-precommit-and-record)
 
 ;; --- In-memory transport (testing + integration smoke) ------------------
 

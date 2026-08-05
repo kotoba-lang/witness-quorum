@@ -167,10 +167,12 @@
       (is (not (contains? result :commit-result)))
       (is (empty? @commit-calls)))))
 
-;; --- write-with-witnesses-precommit-and-slash ----------------------------
-;; ADR-2607110300 Phase 4: reputation.clj and stake.clj were independently
-;; tested but nothing in the actual precommit flow ever called them --
-;; these tests prove the wiring, not just the two modules in isolation.
+;; --- write-with-witnesses-precommit-and-record ---------------------------
+;; ADR-2607110300 Phase 4 wired reputation.clj and stake.clj into the actual
+;; precommit flow; these tests prove the wiring, not just the modules in
+;; isolation. ADR-2608055000 G1 then removed the STAKE half: a quorum verdict
+;; moves reputation and never bond, so the assertions below pin that the
+;; dissenter's ledger comes out untouched.
 
 (defn- synchronous-transport
   "A deterministic, non-concurrent WitnessTransport stub: :request-attestation
@@ -192,10 +194,11 @@
            (do (swap! remaining rest) {:status :value :value item})
            {:status :done})))}))
 
-(deftest precommit-and-slash-penalizes-only-the-disagreeing-witness
+(deftest precommit-and-record-penalizes-reputation-only
   (testing "3-of-5 quorum-threshold reached with the dissenter's :reject
             collected FIRST (deterministic order, not a race) -> :witnessed,
-            and ONLY the dissenter's reputation/stake take a hit"
+            and ONLY the dissenter's REPUTATION takes a hit -- its bond comes
+            through the round whole (ADR-2608055000 G1)"
     (let [fleet (mock-fleet)
           rule (mock-rule "test.example.slash")
           cid "bafy-precommit-tid-slash-1"
@@ -214,7 +217,7 @@
                                    agreeing)
           transport (synchronous-transport (cons dissent-attestation agree-attestations))
           stake-ledger (stake/post-bond stake/empty-ledger (:key dissenter) 100)
-          result (orchestrator/write-with-witnesses-precommit-and-slash
+          result (orchestrator/write-with-witnesses-precommit-and-record
                   {:propose-fn (mock-propose-fn)
                    :commit-fn (fn [_write-opts receipt] {:committed-cid (:cid receipt)})
                    :write-opts {:collection "test.example.slash" :rkey "tid-slash-1" :record {:v 1}}
@@ -222,7 +225,6 @@
                    :rule rule
                    :transport transport
                    :stake-ledger stake-ledger
-                   :slash-amount 25
                    :timeout-ms 5000})]
       (is (= :witnessed (:kind (:state result))))
       (is (true? (:committed? result)))
@@ -230,20 +232,22 @@
           "sanity: the dissenter really did land in :minority, not skipped by early-exit")
       (is (== 0.0 (reputation/score (:reputation-db' result) (:key dissenter)))
           "the dissenter's reputation reflects disagreement")
-      (is (= 75 (stake/balance (:stake-ledger' result) (:key dissenter)))
-          "the dissenter's stake was actually slashed (100 - 25)")
-      (is (= [{:cell-key (:key dissenter) :slashed 25}] (:slashed result)))
+      (is (= 100 (stake/balance (:stake-ledger' result) (:key dissenter)))
+          "the dissenter's bond is UNTOUCHED -- disagreement is not a slashable fault")
+      (is (= stake-ledger (:stake-ledger' result))
+          "the ledger is a pass-through, identical to the one handed in")
+      (is (= [(:key dissenter)] (:disagreed (:outcomes result))))
       (doseq [cell (take 3 agreeing)] ;; only the first 3 accepts were needed to hit threshold=3
         (is (== 1.0 (reputation/score (:reputation-db' result) (:key cell)))
             (str (:key cell) " agreed -> perfect reputation"))))))
 
-(deftest precommit-and-slash-defaults-to-empty-reputation-and-stake
+(deftest precommit-and-record-defaults-to-empty-reputation-and-stake
   (testing "no :reputation-db/:stake-ledger supplied -> defaults apply, still returns the merged keys"
     (let [fleet (mock-fleet)
           rule (mock-rule "test.example.slash-defaults")
           transport (orchestrator/create-in-memory-witness-transport
                      {:cell-handlers (accept-all-handlers fleet)})
-          result (orchestrator/write-with-witnesses-precommit-and-slash
+          result (orchestrator/write-with-witnesses-precommit-and-record
                   {:propose-fn (mock-propose-fn)
                    :commit-fn (fn [_write-opts receipt] {:committed-cid (:cid receipt)})
                    :write-opts {:collection "test.example.slash-defaults" :rkey "tid-slash-2" :record {:v 1}}
@@ -254,9 +258,21 @@
       (is (= :witnessed (:kind (:state result))))
       (is (contains? result :reputation-db'))
       (is (contains? result :stake-ledger'))
-      (is (empty? (:slashed result)) "everyone agreed -- nothing to slash"))))
+      (is (empty? (:disagreed (:outcomes result))) "everyone agreed")
+      (is (empty? (:abstained (:outcomes result))) "nobody abstained"))))
 
-(deftest precommit-and-slash-does-not-apply-outcomes-for-a-pending-state
+(deftest the-deprecated-slash-alias-still-resolves-and-does-not-slash
+  (testing "kept only so a caller pinned to an older witness-quorum keeps
+            resolving while west pins move -- the name survived, the
+            confiscation did not (ADR-2608055000 G1)"
+    ;; The deprecation warning is the point of this test -- it exists to touch
+    ;; the deprecated var. Suppressed here so `-M:lint` stays quiet everywhere
+    ;; a warning would be a real finding.
+    #_{:clj-kondo/ignore [:deprecated-var]}
+    (is (= @#'orchestrator/write-with-witnesses-precommit-and-slash
+           @#'orchestrator/write-with-witnesses-precommit-and-record))))
+
+(deftest precommit-and-record-does-not-apply-outcomes-for-a-pending-state
   (testing "non-decided quorum state (:pending) -> reputation-db'/stake-ledger' pass through
             unchanged, matching reputation/record-quorum-outcomes's own caveat"
     (let [fleet (mock-fleet)
@@ -269,7 +285,7 @@
                                (orchestrator/make-standard-cell-handler
                                 {:cell cell :signer (orchestrator/make-deterministic-test-signer (:cell-id cell))})]))
           transport (orchestrator/create-in-memory-witness-transport {:cell-handlers handlers})
-          result (orchestrator/write-with-witnesses-precommit-and-slash
+          result (orchestrator/write-with-witnesses-precommit-and-record
                   {:propose-fn write-fn
                    :commit-fn (fn [_write-opts receipt] {:committed-cid (:cid receipt)})
                    :write-opts {:collection "test.example.slash-pending" :rkey "tid-slash-3" :record {:v 1}}
@@ -280,4 +296,4 @@
       (is (= :pending (:kind (:state result))))
       (is (= reputation/empty-reputation (:reputation-db' result)))
       (is (= stake/empty-ledger (:stake-ledger' result)))
-      (is (empty? (:slashed result))))))
+      (is (= {:agreed [] :disagreed [] :abstained []} (:outcomes result))))))

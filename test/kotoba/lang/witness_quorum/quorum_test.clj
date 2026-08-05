@@ -111,6 +111,36 @@
           state (quorum/quorum-state w atts {:quorum-size 3 :quorum-threshold 2 :escalation-policy :reject})]
       (is (= :escalated (:kind state))))))
 
+(deftest abstainers-are-separated-from-the-minority
+  (testing "ADR-2608055000 G1. Until 2026-08-05 a decided round returned
+            :minority (into rejects escalates), so a witness whose only act was
+            reporting 'I cannot decide this' was indistinguishable downstream
+            from one that asserted the losing verdict -- and slashing.clj
+            confiscated bond from both."
+    (let [w (witnesses 5)
+          atts [(attest (w 0) :accept "t1") (attest (w 1) :accept "t2")
+                (attest (w 2) :accept "t3")
+                (attest (w 3) :reject "t4") (attest (w 4) :escalate "t5")]
+          state (quorum/quorum-state w atts)
+          keys-of (fn [k] (set (map :cell-node (get state k))))]
+      (is (= :witnessed (:kind state)) "threshold=3 accepts reached")
+      (is (= #{"node-3"} (keys-of :minority)) "only the actual dissenter")
+      (is (= #{"node-4"} (keys-of :abstained)) "the abstainer is its own list")
+      (is (not (contains? (keys-of :minority) "node-4"))
+          "the regression: the abstainer must never appear in :minority"))))
+
+(deftest abstainers-are-separated-under-escalation-policy-reject
+  (testing "the same split exists on the :reject fallback path, which had the
+            identical (into accepts escalates) bug"
+    (let [w (witnesses 4)
+          atts [(attest (w 0) :accept "t1") (attest (w 1) :accept "t2")
+                (attest (w 2) :reject "t3") (attest (w 3) :reject "t4")]
+          state (quorum/quorum-state w atts {:quorum-size 4 :quorum-threshold 3
+                                             :escalation-policy :reject})]
+      (is (= :rejected (:kind state)))
+      (is (= 2 (count (:minority state))) "both accepts dissented")
+      (is (= [] (:abstained state)) "nobody abstained in this split"))))
+
 (deftest quorum-state-dedup-latest-wins-test
   (let [w (witnesses 5)
         atts [(attest (w 0) :reject "t1") (attest (w 0) :accept "t2") ; same cell, later timestamp flips its verdict
