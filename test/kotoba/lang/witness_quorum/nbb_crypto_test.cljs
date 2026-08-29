@@ -8,7 +8,7 @@
 ;; actually running the JVM signer/selector with the same seed/inputs
 ;; (not assumed) -- see this PR's description for the cross-run.
 ;;
-;; Run: nbb -cp test:src test/kotoba/lang/witness_quorum/nbb_crypto_test.cljs
+;; Run: nbb test/kotoba/lang/witness_quorum/nbb_crypto_test.cljs  (reads nbb.edn)
 ;;   or on a fresh machine with no local nbb install:
 ;;     npx --yes nbb -cp test:src test/kotoba/lang/witness_quorum/nbb_crypto_test.cljs
 
