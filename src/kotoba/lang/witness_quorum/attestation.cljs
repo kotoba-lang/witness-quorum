@@ -4,7 +4,7 @@
   Same public API; `canonical-attestation-bytes` must produce bytes that
   hash/sign identically to the JVM version for the same logical inputs,
   since that's the whole point of a cross-platform witness fleet."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba.lang.witness-quorum.selector :as selector]))
 
 (defn- accept-schema [_record _rule] {:layer :schema :verdict :accept})

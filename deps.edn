@@ -1,5 +1,10 @@
 {:paths ["src"]
- :deps {io.github.kotoba-lang/org-ietf-ed25519 {:git/sha "fdcefb9f1b83461fee54d04b63e374fa301ee847"}}
+ :deps {
+        ;; kotoba stdlib, not clojure.*. Pinned as explicit floors: tools.deps
+        ;; takes the NEWEST sha it is shown, so without a floor here this repo
+        ;; silently rides whatever a sibling happens to name.
+        io.github.kotoba-lang/text {:git/sha "73bdb13ae7a3d004b44bca08be03a3191157a38f"}
+       io.github.kotoba-lang/org-ietf-ed25519 {:git/sha "fdcefb9f1b83461fee54d04b63e374fa301ee847"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

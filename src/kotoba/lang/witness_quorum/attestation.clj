@@ -11,7 +11,7 @@
   package (src/attestation.ts). JVM-only -- see the repo README.
 
   Per kotoba-datomic SPEC S4 + S5 + ADR-2605231400."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba.lang.witness-quorum.selector :as selector]))
 
 ;; Default validators -- always accept. Real cells override these per
