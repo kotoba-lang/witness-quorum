@@ -119,7 +119,7 @@ Tests (`test/kotoba/lang/witness_quorum/*_test.clj`, run via `clojure
 -M:test`; every dependency here -- `ed25519.core`, `java.util.concurrent`,
 `java.security.MessageDigest` -- is on babashka's classlist too, so this
 package (unlike `kotoba-lang/ipfs`'s `com.sun.net.httpserver`-based mock
-server tests) has no actual `bb` incompatibility; `clojure -M:test` is
+server tests) has no actual `bb` incompatibility; `kbb -M:test` is
 just the test-runner this repo is wired for, not a requirement): 26 tests /
 77 assertions, covering deterministic selection, the full quorum-state
 decision table (witnessed/rejected/pending/escalated, including the
@@ -132,8 +132,8 @@ cross-language interop vector, and an end-to-end
 ## Development
 
 ```bash
-clojure -M:lint      # clj-kondo (errors fail)
-clojure -M:test      # cognitect test-runner
+kbb -M:lint      # clj-kondo (errors fail)
+kbb -M:test      # cognitect test-runner
 ```
 
 ## License
