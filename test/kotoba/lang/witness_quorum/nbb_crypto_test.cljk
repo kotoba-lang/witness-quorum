@@ -8,9 +8,9 @@
 ;; actually running the JVM signer/selector with the same seed/inputs
 ;; (not assumed) -- see this PR's description for the cross-run.
 ;;
-;; Run: nbb test/kotoba/lang/witness_quorum/nbb_crypto_test.cljk  (reads nbb.edn)
+;; Run: kbb --backend sci test/kotoba/lang/witness_quorum/nbb_crypto_test.cljk  (reads nbb.edn)
 ;;   or on a fresh machine with no local nbb install:
-;;     npx --yes nbb -cp test:src test/kotoba/lang/witness_quorum/nbb_crypto_test.cljk
+;;     npx --yes kbb --backend sci -cp test:src test/kotoba/lang/witness_quorum/nbb_crypto_test.cljk
 
 (ns kotoba.lang.witness-quorum.nbb-crypto-test
   (:require [cljs.test :refer [deftest is testing run-tests]]
