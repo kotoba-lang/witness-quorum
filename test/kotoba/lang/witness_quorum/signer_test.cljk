@@ -8,7 +8,7 @@
   message, which is the whole point of a cross-language attestation scheme:
   a signature produced on one side must verify (and, since Ed25519 is
   deterministic, byte-match) on the other."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.signer :as signer]))
 
 (defn- hex->bytes ^bytes [^String hex]

@@ -6,7 +6,7 @@
   wires the pieces together correctly, not that any particular substrate
   backend works. Mirrors the spirit of the original TS
   test/witnessed-write.test.ts."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.orchestrator :as orchestrator]
             [kotoba.lang.witness-quorum.reputation :as reputation]
