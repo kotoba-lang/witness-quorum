@@ -4,7 +4,7 @@
   `slash-clamps-when-a-minority-cell-has-insufficient-stake`, ...) pinned the
   behaviour this change removes: bond confiscated for disagreeing with a
   majority."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.outcome :as outcome]
             [kotoba.lang.witness-quorum.reputation :as reputation]
             [kotoba.lang.witness-quorum.stake :as stake]))

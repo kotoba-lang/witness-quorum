@@ -1,5 +1,5 @@
 (ns kotoba.lang.witness-quorum.selector-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.selector :as selector]))
 
 (defn- mock-fleet []

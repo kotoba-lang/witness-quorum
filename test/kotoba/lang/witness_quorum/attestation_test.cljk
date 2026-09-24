@@ -1,5 +1,5 @@
 (ns kotoba.lang.witness-quorum.attestation-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.selector :as selector]))
 
