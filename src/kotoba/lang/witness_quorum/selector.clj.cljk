@@ -8,7 +8,8 @@
   see the repo README for why this package skips CLJS entirely.
 
   Per kotoba-datomic SPEC S5 + ADR-2605231400."
-  (:import [java.security MessageDigest]))
+  (:import [java.security MessageDigest])
+  (:require [kotoba.bytes :as kbytes]))
 
 (defn fleet-cell
   "Build a fleet cell map from a node hostname/name + cell-id. The composite
@@ -30,7 +31,7 @@
      public-key (assoc :public-key public-key))))
 
 (defn- sha256-hex ^String [^String s]
-  (let [digest (.digest (MessageDigest/getInstance "SHA-256") (.getBytes s "UTF-8"))]
+  (let [digest (.digest (MessageDigest/getInstance "SHA-256") (kbytes/utf8-bytes s))]
     (apply str (map #(format "%02x" (bit-and (int %) 0xff)) digest))))
 
 (defn quorum-group

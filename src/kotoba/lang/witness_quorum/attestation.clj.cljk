@@ -11,7 +11,7 @@
   package (src/attestation.ts). JVM-only -- see the repo README.
 
   Per kotoba-datomic SPEC S4 + S5 + ADR-2605231400."
-  (:require [kotoba.lang.text :as str]
+  (:require [kotoba.bytes :as kbytes] [kotoba.lang.text :as str]
             [kotoba.lang.witness-quorum.selector :as selector]))
 
 ;; Default validators -- always accept. Real cells override these per
@@ -80,8 +80,7 @@
   the TS/Python sibling implementations' string enum values for
   cross-language signature verification to hold."
   [{:keys [record-cid cell-id verdict reason membrane-version attested-at]}]
-  (.getBytes ^String (str/join "\n" [record-cid cell-id (name verdict) reason membrane-version attested-at])
-             "UTF-8"))
+  (kbytes/utf8-bytes ^String (str/join "\n" [record-cid cell-id (name verdict) reason membrane-version attested-at])))
 
 (defn produce-attestation
   "Cell-side: validate + sign + format an attestation map.

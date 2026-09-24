@@ -8,7 +8,7 @@
   message, which is the whole point of a cross-language attestation scheme:
   a signature produced on one side must verify (and, since Ed25519 is
   deterministic, byte-match) on the other."
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.bytes :as kbytes] [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.signer :as signer]))
 
 (defn- hex->bytes ^bytes [^String hex]
@@ -56,13 +56,13 @@
   (testing "produces a 64-byte signature"
     (let [seed (byte-array (repeat 32 (unchecked-byte 0xAA)))
           s (signer/make-ed25519-cell-signer seed)
-          sig (s (.getBytes "hello world" "UTF-8"))]
+          sig (s (kbytes/utf8-bytes "hello world"))]
       (is (= 64 (alength ^bytes sig)))))
 
   (testing "deterministic -- same input, same signature"
     (let [seed (byte-array (repeat 32 (byte 1)))
           s (signer/make-ed25519-cell-signer seed)
-          msg (.getBytes "canonical" "UTF-8")]
+          msg (kbytes/utf8-bytes "canonical")]
       (is (= (seq (s msg)) (seq (s msg))))))
 
   (testing "rejects a non-32-byte private key"
@@ -86,7 +86,7 @@
     (let [seed (byte-array (repeat 32 (byte 5)))
           s (signer/make-ed25519-cell-signer seed)
           pk (signer/ed25519-public-key-bytes seed)
-          canonical (.getBytes "canonical attestation bytes" "UTF-8")
+          canonical (kbytes/utf8-bytes "canonical attestation bytes")
           sig (s canonical)]
       (is (true? (signer/verify-ed25519-signature canonical sig pk)))))
 
@@ -94,15 +94,15 @@
     (let [seed (byte-array (repeat 32 (byte 6)))
           s (signer/make-ed25519-cell-signer seed)
           pk (signer/ed25519-public-key-bytes seed)
-          sig (s (.getBytes "original" "UTF-8"))]
-      (is (false? (signer/verify-ed25519-signature (.getBytes "tampered" "UTF-8") sig pk)))))
+          sig (s (kbytes/utf8-bytes "original"))]
+      (is (false? (signer/verify-ed25519-signature (kbytes/utf8-bytes "tampered") sig pk)))))
 
   (testing "rejects mismatched pubkey"
     (let [seed-a (byte-array (repeat 32 (byte 7)))
           seed-b (byte-array (repeat 32 (byte 8)))
           s (signer/make-ed25519-cell-signer seed-a)
           pk-b (signer/ed25519-public-key-bytes seed-b)
-          msg (.getBytes "msg" "UTF-8")
+          msg (kbytes/utf8-bytes "msg")
           sig (s msg)]
       (is (false? (signer/verify-ed25519-signature msg sig pk-b)))))
 
