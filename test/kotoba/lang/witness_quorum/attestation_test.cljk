@@ -1,5 +1,5 @@
 (ns kotoba.lang.witness-quorum.attestation-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.bytes :as kbytes] [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.selector :as selector]))
 
@@ -18,7 +18,7 @@
 
 (defn- sha256-test-signer [cell-id]
   (fn [^bytes canonical]
-    (let [cell-bytes (.getBytes ^String cell-id "UTF-8")
+    (let [cell-bytes (kbytes/utf8-bytes ^String cell-id)
           combined (byte-array (+ (alength canonical) (alength cell-bytes)))]
       (System/arraycopy canonical 0 combined 0 (alength canonical))
       (System/arraycopy cell-bytes 0 combined (alength canonical) (alength cell-bytes))
@@ -76,7 +76,7 @@
                   :reason "" :membrane-version "lex:1.0.0/rego:1.0.0/cell:abcdef0"
                   :attested-at "2026-05-23T00:00:00Z"})]
       (is (= "bafy-cid-12345\nCellA\naccept\n\nlex:1.0.0/rego:1.0.0/cell:abcdef0\n2026-05-23T00:00:00Z"
-             (String. ^bytes bytes "UTF-8"))))))
+             (kbytes/utf8-string ^bytes bytes))))))
 
 (deftest produce-attestation-test
   (testing "emits a signed, verdict-tagged attestation"
