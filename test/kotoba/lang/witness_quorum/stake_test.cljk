@@ -1,5 +1,5 @@
 (ns kotoba.lang.witness-quorum.stake-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.stake :as stake]))
 
 (deftest post-bond-accumulates
@@ -7,7 +7,7 @@
     (is (= 150 (stake/balance l "n::c")))))
 
 (deftest post-bond-rejects-negative-amounts
-  (is (thrown? clojure.lang.ExceptionInfo (stake/post-bond stake/empty-ledger "n::c" -1))))
+  (is (thrown? kerror/ExceptionInfo (stake/post-bond stake/empty-ledger "n::c" -1))))
 
 (deftest slash-reduces-balance-by-the-removed-amount
   (let [l (stake/post-bond stake/empty-ledger "n::c" 100)
@@ -28,4 +28,4 @@
     (is (= 0 (stake/balance ledger "n::ghost")))))
 
 (deftest slash-rejects-negative-amounts
-  (is (thrown? clojure.lang.ExceptionInfo (stake/slash! stake/empty-ledger "n::c" -1))))
+  (is (thrown? kerror/ExceptionInfo (stake/slash! stake/empty-ledger "n::c" -1))))

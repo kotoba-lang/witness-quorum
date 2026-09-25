@@ -8,7 +8,7 @@
   message, which is the whole point of a cross-language attestation scheme:
   a signature produced on one side must verify (and, since Ed25519 is
   deterministic, byte-match) on the other."
-  (:require [kotoba.bytes :as kbytes] [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.bytes :as kbytes] [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.signer :as signer]))
 
 (defn- hex->bytes ^bytes [^String hex]
@@ -66,8 +66,8 @@
       (is (= (seq (s msg)) (seq (s msg))))))
 
   (testing "rejects a non-32-byte private key"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"32 bytes" (signer/make-ed25519-cell-signer (byte-array 31))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"32 bytes" (signer/make-ed25519-cell-signer (byte-array 33))))))
+    (is (thrown-with-msg? kerror/ExceptionInfo #"32 bytes" (signer/make-ed25519-cell-signer (byte-array 31))))
+    (is (thrown-with-msg? kerror/ExceptionInfo #"32 bytes" (signer/make-ed25519-cell-signer (byte-array 33))))))
 
 (deftest ed25519-public-key-bytes-test
   (testing "derives a 32-byte public key"
@@ -79,7 +79,7 @@
       (is (not= (seq pk-a) (seq pk-b)))))
 
   (testing "rejects a non-32-byte seed"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"32 bytes" (signer/ed25519-public-key-bytes (byte-array 31))))))
+    (is (thrown-with-msg? kerror/ExceptionInfo #"32 bytes" (signer/ed25519-public-key-bytes (byte-array 31))))))
 
 (deftest verify-ed25519-signature-test
   (testing "round-trip: sign then verify with matching pubkey -> true"
@@ -111,5 +111,5 @@
       (is (false? (signer/verify-ed25519-signature (byte-array 10) (byte-array 63) pk)))))
 
   (testing "rejects a non-32-byte pubkey"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"32 bytes"
+    (is (thrown-with-msg? kerror/ExceptionInfo #"32 bytes"
                            (signer/verify-ed25519-signature (byte-array 1) (byte-array 64) (byte-array 31))))))

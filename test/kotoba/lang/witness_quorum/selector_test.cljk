@@ -1,5 +1,5 @@
 (ns kotoba.lang.witness-quorum.selector-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.selector :as selector]))
 
 (defn- mock-fleet []
@@ -17,7 +17,7 @@
     (is (= 30 (count (mock-fleet)))))
 
   (testing "throws when a node has neither name nor hostname"
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (selector/flatten-fleet [{:cells ["CellA"]}])))))
 
 (deftest quorum-group-test
@@ -53,9 +53,9 @@
         (is (= 5 (count (set (map :key selected)))))))
 
     (testing "throws when the fleet is smaller than quorum-size"
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (selector/select-witnesses "bafy-cid-x" (take 2 fleet) 5))))
 
     (testing "throws when quorum-size < 1"
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? kerror/ExceptionInfo
                    (selector/select-witnesses "bafy-cid-x" fleet 0))))))
