@@ -1,5 +1,5 @@
 (ns kotoba.lang.witness-quorum.quorum-test
-  (:require [kotoba.test :refer [deftest is testing]]
+  (:require [kotoba.lang.error :as kerror] [kotoba.test :refer [deftest is testing]]
             [kotoba.lang.witness-quorum.attestation :as attestation]
             [kotoba.lang.witness-quorum.quorum :as quorum]
             [kotoba.lang.witness-quorum.selector :as selector]
@@ -155,10 +155,10 @@
 
 (deftest quorum-state-validates-inputs-test
   (testing "throws when threshold exceeds size"
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (quorum/quorum-state (witnesses 3) [] {:quorum-size 3 :quorum-threshold 4}))))
   (testing "throws when witness count doesn't match quorum-size"
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? kerror/ExceptionInfo
                  (quorum/quorum-state (witnesses 3) [] {:quorum-size 5})))))
 
 ;; --- collect-quorum, against a real LinkedBlockingQueue-backed poll-fn ---
